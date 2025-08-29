@@ -1,11 +1,13 @@
 const http = require("http");
 const { URL } = require("url");
 const { request } = require("https");
+const fs = require("fs");
 require("dotenv").config();
 
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = "http://localhost:3000/oauth2/callback";
+const TOKEN_PATH = "./token.json";
 
 const PORT = 3000;
 
@@ -98,6 +100,31 @@ async function exchangeCodeForToken(code) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
+  if (fs.existsSync(TOKEN_PATH)) {
+    try {
+      let savedTokens = JSON.parse(fs.readFileSync(TOKEN_PATH));
+
+      let accessToken = savedTokens.access_token;
+
+      if (savedTokens.refresh_token) {
+        const newTokens = await refreshAccessToken(savedTokens.refresh_token);
+        accessToken = newTokens.access_token;
+        savedTokens.access_token = accessToken;
+        fs.writeFileSync(TOKEN_PATH, JSON.stringify(savedTokens));
+      }
+
+      const userInfo = await getUserInfo(accessToken);
+      return send(
+        res,
+        200,
+        `<h1>Welcome back, ${userInfo.name}</h1>
+         <p>Email: ${userInfo.email}</p>`
+      );
+    } catch (err) {
+      console.error("Error using saved token:", err);
+    }
+  }
+
   if (url.pathname === "/") {
     return send(res, 200, `<a href="${googleAuthUrl()}">Login with Google</a>`);
   }
@@ -108,6 +135,8 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const tokens = await exchangeCodeForToken(code);
+
+      fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
       const userInfo = await getUserInfo(tokens.access_token);
 
       return send(
